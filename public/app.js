@@ -532,6 +532,10 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function createTestSuffix() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function runDeletionTests() {
   runDeletionTestsButton.disabled = true;
   createDeletionTestUserButton.disabled = true;
@@ -609,7 +613,7 @@ async function runDeletionTests() {
       failed += 1;
     }
 
-    const suffix = `${Date.now()}-${crypto.randomUUID()}`;
+    const suffix = createTestSuffix();
     const missingId = `delete-test-inexistente-${suffix}`;
     await check("DELETE · responder 404 para un usuario inexistente", 404, () => api.remove(missingId));
   } catch (error) {
@@ -637,7 +641,7 @@ async function runDeletionTests() {
 
 createDeletionTestUserButton.addEventListener("click", async () => {
   createDeletionTestUserButton.disabled = true;
-  const suffix = `${Date.now()}-${crypto.randomUUID()}`;
+  const suffix = createTestSuffix();
   try {
     const created = await api.create({
       name: "Usuario prueba de eliminación",
@@ -669,7 +673,7 @@ async function runLiveTests() {
   let failed = 0;
   let createdId;
   let secondId;
-  const suffix = `${Date.now()}-${crypto.randomUUID()}`;
+  const suffix = createTestSuffix();
   const firstUser = { name: "Prueba CI", email: `api-test-${suffix}@example.com` };
   const secondUser = { name: "Prueba CI 2", email: `api-test-2-${suffix}@example.com` };
 
