@@ -1,0 +1,134 @@
+name: CI/CD API REST
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Pruebas y cobertura
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar pruebas y umbrales de cobertura
+        run: npm test
+
+  publish:
+    name: Publicar imagen en Docker Hub
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Definir nombre de la imagen
+        id: image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [[ ! "$DOCKERHUB_USERNAME" =~ ^[a-z0-9._-]+$ ]]; then
+            echo "::error::Configura DOCKERHUB_USERNAME como secreto válido."
+            exit 1
+          fi
+          echo "image=${DOCKERHUB_USERNAME}/integrador-api-rest" >> "$GITHUB_OUTPUT"
+
+      - name: Iniciar sesión en Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Preparar etiquetas de imagen
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+
+      - name: Construir y publicar imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+
+  deploy:
+    name: Despliegue blue-green en EC2
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar SSH con verificación de host
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          test -n "$EC2_SSH_KEY" || { echo "::error::Falta EC2_SSH_KEY."; exit 1; }
+          test -n "$EC2_KNOWN_HOSTS" || { echo "::error::Falta EC2_KNOWN_HOSTS."; exit 1; }
+          test -n "$EC2_HOST" || { echo "::error::Falta EC2_HOST."; exit 1; }
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Instalar el script de despliegue en EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          if [[ ! "$EC2_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            echo "::error::Configura EC2_USER como nombre de usuario Linux válido."
+            exit 1
+          fi
+          scp -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
+            deploy/ec2/deploy.sh deploy/ec2/deploy-with-auth.sh \
+            "${EC2_USER}@${EC2_HOST}:/opt/devops-api/"
+
+      - name: Autenticar y desplegar la imagen probada
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE: ${{ needs.publish.outputs.image }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          if [[ ! "$DOCKERHUB_USERNAME" =~ ^[a-z0-9._-]+$ ]]; then
+            echo "::error::Configura DOCKERHUB_USERNAME como secreto válido."
+            exit 1
+          fi
+          test -n "$DOCKERHUB_TOKEN" || { echo "::error::Falta DOCKERHUB_TOKEN."; exit 1; }
+          printf '%s\n' "$DOCKERHUB_TOKEN" | ssh \
+            -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "bash /opt/devops-api/deploy-with-auth.sh '${DOCKERHUB_USERNAME}' '${IMAGE}:${GITHUB_SHA}'"
