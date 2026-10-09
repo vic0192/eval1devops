@@ -1,0 +1,148 @@
+COMANDOS DEL PROYECTO INTEGRADOR CI/CD
+======================================
+
+Usar en PowerShell desde la carpeta del proyecto:
+C:\Users\vicoe\OneDrive\Desktop\devops\eval1
+
+1. DESARROLLO Y PUBLICACION DE CAMBIOS
+--------------------------------------
+
+# Comprobar los cambios antes de subirlos
+git status
+git diff
+
+# Ejecutar pruebas y cobertura localmente
+npm test
+
+# Guardar los cambios en Git y subirlos a main
+git add .
+git commit -m "Describe el cambio"
+git push origin main
+
+# Verificar la rama y el ultimo commit
+git branch --show-current
+git log -1 --oneline
+
+Al hacer push a main, GitHub Actions ejecuta automaticamente las pruebas.
+Si pasan, publica la imagen en Docker Hub y despliega en EC2. No hay que
+ejecutar comandos SSH o Docker manualmente para un despliegue normal.
+
+IMPORTANTE: antes de git add ., revisar git status y confirmar que no se
+incluyan archivos .env, claves privadas, tokens, contrasenas ni otros secretos.
+Los secretos de GitHub se configuran en Settings > Secrets and variables >
+Actions; nunca se escriben en este archivo ni en el codigo.
+
+2. INSTALAR Y EJECUTAR LOCALMENTE
+----------------------------------
+
+# Instalar exactamente las dependencias del lockfile (primera vez o al cambiarlo)
+npm ci
+
+# Ejecutar la API y el panel en http://localhost:3000
+npm start
+
+# Opcional: iniciar localmente en el puerto 43000
+$env:PORT = "43000"
+npm start
+
+# Comprobar la API local en el puerto predeterminado
+Invoke-RestMethod http://localhost:3000/api/health
+
+# Comprobar la API local si se inicio en el puerto 43000
+Invoke-RestMethod http://localhost:43000/api/health
+
+Para detener npm start, presionar Ctrl+C en esa ventana de PowerShell.
+
+3. PROBAR LA API MANUALMENTE (PowerShell)
+------------------------------------------
+
+# Consultar salud
+Invoke-RestMethod http://localhost:3000/api/health
+
+# Crear un usuario; guardar el id devuelto para usarlo en las solicitudes
+$usuario = Invoke-RestMethod -Method Post `
+  -Uri http://localhost:3000/api/users `
+  -ContentType "application/json" `
+  -Body '{"name":"Ana Perez","email":"ana@example.com"}'
+$usuario
+$id = $usuario.data.id
+
+# Listar usuarios
+Invoke-RestMethod http://localhost:3000/api/users
+
+# Consultar un usuario por id
+Invoke-RestMethod "http://localhost:3000/api/users/$id"
+
+# Actualizar un usuario
+Invoke-RestMethod -Method Put `
+  -Uri "http://localhost:3000/api/users/$id" `
+  -ContentType "application/json" `
+  -Body '{"name":"Ana Actualizada","email":"ana@example.com"}'
+
+# Eliminar un usuario (una respuesta HTTP 204 puede mostrarse sin contenido)
+Invoke-WebRequest -Method Delete -Uri "http://localhost:3000/api/users/$id"
+
+# Consultar la API publica despues del despliegue
+Invoke-RestMethod "http://<IP-o-DNS-EC2>/api/health"
+
+4. DOCKER LOCAL (OPCIONAL)
+---------------------------
+
+# Construir la imagen
+docker build -t integrador-api-rest:local .
+
+# Ejecutar la imagen en el puerto 3000
+docker run --rm -p 3000:3000 integrador-api-rest:local
+
+# Consultar la API del contenedor en otra ventana de PowerShell
+Invoke-RestMethod http://localhost:3000/api/health
+
+# Ver contenedores activos
+docker ps
+
+5. PREPARACION INICIAL DE EC2 (NO REPETIR EN CADA DESPLIEGUE)
+--------------------------------------------------------------
+
+La instancia ya fue preparada. Estos comandos son solo referencia para una
+instalacion nueva o una recuperacion planificada.
+
+# Desde la carpeta del proyecto, copiar los scripts a Ubuntu
+$key = "$env:USERPROFILE\.ssh\mi-clave.pem"
+ssh -i $key ubuntu@<IP-o-DNS-EC2> "mkdir -p ~/deploy"
+scp -i $key `
+  -r deploy/ec2 ubuntu@<IP-o-DNS-EC2>:~/deploy/
+
+# Conectarse a la instancia
+ssh -i $key ubuntu@<IP-o-DNS-EC2>
+
+# Ya dentro de Ubuntu: normalizar finales de linea si los scripts se copiaron
+# desde Windows y preparar la instancia una sola vez
+sed -i 's/\r$//' ~/deploy/ec2/*.sh
+cd ~
+sudo bash deploy/ec2/bootstrap.sh
+
+# Comprobar el proxy y Docker desde Ubuntu
+sudo systemctl status docker --no-pager
+docker ps
+curl http://localhost/api/health
+
+No compartir ni subir el archivo de clave privada SSH. Sustituir los textos
+entre < > por los valores propios al ejecutar los comandos; no escribir aqui
+tokens ni claves.
+
+6. COMPROBAR EL PIPELINE
+------------------------
+
+# Consultar el ultimo estado del repositorio
+git status
+
+# En GitHub: repositorio > Actions > workflow "CI/CD API REST"
+# Revisar en orden los trabajos:
+#   - Pruebas y cobertura
+#   - Publicar imagen en Docker Hub
+#   - Despliegue blue-green en EC2
+
+# Despues de que el pipeline termine exitosamente:
+Invoke-RestMethod "http://<IP-o-DNS-EC2>/api/health"
+
+Si las pruebas fallan, el workflow no publica ni despliega la imagen.
