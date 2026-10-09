@@ -41,7 +41,7 @@ describe("API REST de usuarios", () => {
     const response = await request(app).get("/api/health");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok" });
+    expect(response.body).toEqual({ state: "ok-testing" });
   });
 
   test("permite enviar mensajes, consultar bandejas y rechazar con aviso al remitente", async () => {

@@ -15,6 +15,7 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
 \usepackage{ragged2e}
+\usepackage{url}
 \setstretch{1.5}
 \AtBeginDocument{\justifying}
 \setlength{\parindent}{1.27cm}
@@ -50,20 +51,23 @@
 
 \section*{Introducción}
 \addcontentsline{toc}{section}{Introducción}
-El desarrollo de una aplicación web no termina cuando el código compila en la computadora de quien lo escribió. Para que una API REST pueda evolucionar de manera confiable, es necesario verificar los cambios, construir un artefacto reproducible y publicarlo de forma controlada en un entorno accesible. Cuando estos pasos dependen exclusivamente de acciones manuales, aumentan las posibilidades de omitir una prueba, utilizar una versión equivocada o dejar desactualizado el servidor. La integración continua y el despliegue continuo (CI/CD) organizan estas actividades como un flujo repetible que ofrece evidencia verificable en cada actualización.
+El desarrollo de una aplicación web no termina cuando el código compila en la computadora de quien lo escribió. Para que una API REST pueda evolucionar de manera confiable, es necesario verificar los cambios, construir un artefacto reproducible y publicarlo de forma controlada en un entorno accesible. Cuando estos pasos dependen exclusivamente de acciones manuales, aumentan las posibilidades de omitir una prueba, utilizar una versión equivocada o dejar desactualizado el servidor. La integración continua y el despliegue continuo (CI/CD) organizan estas actividades como un flujo repetible que ofrece evidencia verificable en cada actualización. En este contexto, automatizar no significa publicar cualquier modificación sin controles: significa establecer condiciones explícitas para decidir qué cambios pueden avanzar y conservar evidencia de cada etapa.
 
-Este proyecto implementa ese flujo para una API REST de administración de usuarios, desarrollada con Node.js 22 y Express. El servicio expone seis operaciones HTTP: consultar su estado de salud, crear y listar usuarios, consultar un usuario por identificador, actualizarlo y eliminarlo. Para mantener un alcance adecuado a la práctica, los datos se almacenan en memoria: esto facilita demostrar las solicitudes y respuestas de la API, pero implica que los registros se pierden al reiniciar el proceso. Por tanto, este diseño no se presenta como una solución de persistencia para una aplicación productiva.
+Una API REST organiza el acceso a recursos mediante representaciones y operaciones de HTTP; por ello, sus métodos y códigos de respuesta forman parte del contrato observable entre el cliente y el servidor \cite{fielding2000,rfc9110}. Este proyecto implementa y despliega ese tipo de servicio para administrar usuarios y mensajería interna, con Node.js 22 y Express. La API expone más de seis operaciones funcionales: consulta de salud, creación, listado, consulta individual, actualización y eliminación de usuarios; además, permite enviar, consultar y rechazar mensajes. Cada respuesta se evalúa de acuerdo con el resultado de la operación, por ejemplo, creación aceptada, datos inválidos, conflicto o recurso inexistente.
 
-La calidad funcional se comprueba mediante pruebas de integración que envían solicitudes HTTP a la aplicación y verifican códigos de estado y respuestas. Jest produce el reporte de cobertura, mientras que Supertest permite probar Express sin exigir un servidor externo. La configuración exige un mínimo global de 70\,\% en ramas, funciones, líneas y sentencias. Así, una prueba exitosa no depende solamente de que el proceso termine sin errores: el umbral impone una condición observable que debe satisfacerse antes de aceptar los cambios.
+La calidad funcional se comprueba desde dos niveles complementarios. Las pruebas automatizadas del backend envían solicitudes HTTP a la aplicación y verifican códigos de estado, contenido y reglas de negocio; Jest ejecuta la suite y genera el reporte de cobertura, mientras Supertest facilita probar Express sin levantar un servidor externo \cite{jestdocs,supertestdocs}. Además, el panel ejecuta verificaciones HTTP contra el servidor local o el servicio publicado y presenta el resultado de cada caso. La configuración exige un mínimo global de 70\,\% en ramas, funciones, líneas y sentencias. Este umbral es una condición de aceptación del pipeline, no una afirmación de que la cobertura por sí sola garantice ausencia de defectos.
 
-Docker empaqueta la aplicación y sus dependencias de producción en una imagen con una versión de Node.js definida, un usuario sin privilegios y una comprobación de salud. La imagen separa la instalación de dependencias del contenido de pruebas y archivos locales mediante un contexto depurado con \texttt{.dockerignore}. Docker Hub funciona como registro de versiones: la automatización autentica la publicación con un token de acceso y conserva tanto la etiqueta \texttt{latest} como otra etiquetada con el SHA completo del commit. La etiqueta inmutable por commit permite identificar qué código se construyó y desplegó.
+Docker empaqueta la aplicación y sus dependencias de producción en una imagen con una versión de Node.js definida, un usuario sin privilegios y una comprobación de salud. La construcción de imágenes y el uso de contenedores permiten entregar el mismo artefacto entre etapas y separar el entorno de ejecución de las dependencias instaladas en una computadora anfitriona \cite{dockerdocs}. La imagen aplica una estrategia de varias etapas y excluye archivos locales, secretos y artefactos de prueba mediante \texttt{.dockerignore}. Docker Hub funciona como registro de versiones: la automatización autentica la publicación con un token de acceso y conserva tanto la etiqueta mutable \texttt{latest} como otra identificada por el SHA completo del commit. Esta segunda etiqueta permite relacionar el artefacto con el código que lo produjo y evita depender únicamente de una referencia que puede cambiar.
 
-GitHub Actions conecta las verificaciones y la distribución del artefacto. Cada solicitud de integración y cada actualización de \texttt{main} ejecutan las pruebas y validan el umbral de cobertura. Un \textit{pull request} no tiene permiso para publicar ni para modificar el servidor. Solo una actualización aceptada en la rama principal puede publicar la imagen y habilitar el trabajo de despliegue. Esta separación limita el efecto de código que todavía no ha pasado la revisión y reduce el riesgo de que un evento externo provoque una publicación no autorizada.
+GitHub Actions conecta las verificaciones y la distribución del artefacto mediante trabajos encadenados \cite{githubactions}. Cada solicitud de integración y cada actualización de \texttt{main} ejecutan las pruebas y validan el umbral de cobertura. Un \textit{pull request} termina después de la validación y no publica ni despliega; solo un \textit{push} a la rama principal que haya superado las pruebas habilita la publicación de la imagen y el trabajo de despliegue. La dirección del servidor, la clave SSH y el token del registro se mantienen como secretos del repositorio, no como valores incorporados al código. Esta separación reduce el riesgo de exponer credenciales o desplegar cambios que no hayan superado las comprobaciones.
 
-El destino es una instancia Ubuntu de AWS EC2. Para no detener primero el proceso que recibe las peticiones, el despliegue ejecuta dos espacios alternos para la API, protegidos por un proxy Nginx que escucha en el puerto 80. La nueva versión se inicia en el espacio inactivo y debe contestar correctamente su comprobación de salud antes de que Nginx cambie el destino del tráfico. Si esa validación falla, el procedimiento deja intacta la ruta hacia la versión activa; si el proxy no acepta la configuración nueva, se recupera la configuración anterior. Esta estrategia blue-green busca mantener la atención de solicitudes durante una actualización, aunque una sola instancia EC2 sigue siendo un punto único de fallo y no proporciona por sí misma alta disponibilidad ante una caída de infraestructura.
+El destino es una instancia Ubuntu de Amazon Elastic Compute Cloud (EC2), servicio que proporciona máquinas virtuales configurables en la nube \cite{awsec2}. Para reducir la interrupción durante una actualización, el despliegue ejecuta dos espacios alternos para la API, protegidos por un proxy Nginx que escucha en el puerto 80. La nueva versión se inicia en el espacio inactivo y debe contestar correctamente su comprobación de salud antes de que Nginx cambie el destino del tráfico. Si esa validación falla, el procedimiento deja intacta la ruta hacia la versión activa; si el proxy no acepta la configuración nueva, se recupera la configuración anterior. Esta estrategia blue-green busca mantener la atención de solicitudes durante el intercambio, aunque una sola instancia EC2 sigue siendo un punto único de fallo y no proporciona por sí misma alta disponibilidad ante una caída de infraestructura.
 
-El informe documenta la arquitectura, las pruebas realizadas, las figuras del procedimiento y las limitaciones encontradas. También destaca una decisión esencial del ejercicio: direcciones de servidores, claves privadas y tokens no deben formar parte del código versionado. Estos valores se guardan en GitHub Secrets y el registro se autentica sin escribir la contraseña en los comandos de despliegue. La reproducibilidad se demuestra al relacionar un cambio en \texttt{main} con los resultados de prueba, la etiqueta del contenedor y la comprobación de salud del servicio publicado.
+El alcance se limita a una aplicación demostrativa y a una instancia de despliegue. Los usuarios y mensajes se mantienen en memoria, por lo que se pierden cuando se reinicia el proceso o se reemplaza el contenedor; tampoco se pretende simular persistencia durable, alta disponibilidad, escalado horizontal ni operación de correo electrónico externo. Explicitar estas limitaciones permite interpretar los resultados dentro de lo que efectivamente implementa el proyecto y evita atribuir a la demostración propiedades que no se midieron.
+
+El informe presenta los objetivos, el diseño del flujo, el procedimiento de validación y los resultados observados. Las figuras de arquitectura explican las etapas y el cambio blue-green; los anexos reúnen evidencia del panel, las pruebas HTTP, GitHub Actions, Docker Hub y la respuesta del endpoint desplegado. La relación entre el commit, la imagen etiquetada y el estado del servicio permite seguir el artefacto desde el repositorio hasta el ambiente de ejecución. En conjunto, el trabajo busca demostrar un proceso reproducible, con pruebas previas a la publicación y credenciales gestionadas fuera del código fuente.
 \newpage
+\renewcommand{\contentsname}{Índice general}
 \tableofcontents
 \newpage
 
@@ -81,7 +85,7 @@ Implementar y documentar un flujo automatizado que pruebe una API REST, verifiqu
 \end{itemize}
 
 \section{Arquitectura y procedimiento}
-La implementación está compuesta por una API Express, una suite de pruebas de integración, una receta de imagen Docker, un registro de imágenes, un flujo de GitHub Actions y un servidor EC2 con un proxy Nginx. El flujo inicia con un cambio propuesto a \texttt{main}. La etapa de pruebas precede obligatoriamente a la publicación; el despliegue, a su vez, depende de la publicación exitosa. Las solicitudes de integración terminan tras la verificación y no obtienen secretos de despliegue.
+La implementación está compuesta por una API Express, una suite de pruebas de integración, una receta de imagen Docker, un registro de imágenes, un flujo de GitHub Actions y un servidor EC2 con un proxy Nginx. La figura~\ref{fig:pipeline} resume la secuencia. El flujo inicia con un cambio propuesto a \texttt{main}. La etapa de pruebas precede obligatoriamente a la publicación; el despliegue, a su vez, depende de la publicación exitosa. Las solicitudes de integración terminan tras la verificación y no obtienen secretos de despliegue.
 
 \begin{figure}[H]
 \centering
@@ -102,7 +106,7 @@ La implementación está compuesta por una API Express, una suite de pruebas de 
 \label{fig:pipeline}
 \end{figure}
 
-La instancia publica el puerto TCP 80 a través de Nginx y restringe los puertos internos de la API a la interfaz local. El despliegue descarga la versión identificada por el SHA, en vez de depender únicamente de una etiqueta mutable. Se requiere una clave de host SSH verificada y fijada para impedir conexiones a un servidor cuya identidad no coincida con la configurada.
+La topología de ejecución se representa en la figura~\ref{fig:ec2}. La instancia publica el puerto TCP 80 a través de Nginx y restringe los puertos internos de la API a la interfaz local. El despliegue descarga la versión identificada por el SHA, en vez de depender únicamente de una etiqueta mutable. Se requiere una clave de host SSH verificada y fijada para impedir conexiones a un servidor cuya identidad no coincida con la configurada.
 
 \begin{figure}[H]
 \centering
@@ -127,6 +131,8 @@ La instancia publica el puerto TCP 80 a través de Nginx y restringe los puertos
 \subsection{Pruebas y cobertura}
 La suite cubre las operaciones de usuarios y mensajería interna: creación y consulta de mensajes, bandejas de entrada y enviados, rechazo con aviso visible al remitente, validación de datos y permisos del destinatario. También valida entradas incorrectas, correos duplicados, recursos inexistentes y cuerpos JSON malformados. El comando \texttt{npm test} ejecuta Jest en serie y muestra el porcentaje de cobertura en la terminal. Los umbrales se configuran por separado para ramas, funciones, líneas y sentencias: si cualquiera de ellos cae por debajo del 70\,\%, la etapa del pipeline falla.
 
+En la ejecución local observada, las 19 pruebas automatizadas del backend finalizaron aprobadas. La cobertura fue superior al umbral en las cuatro métricas, como se resume en la tabla~\ref{tab:pruebas}. De forma complementaria, el panel ejecutó 12 verificaciones HTTP en vivo: incluyó lecturas correctas, creación, actualización, validaciones negativas y eliminación del usuario temporal. Los resultados mostraron el código esperado en los 12 casos; la evidencia del panel y del detalle de estas verificaciones se conserva en las figuras~\ref{fig:anexo-panel} y~\ref{fig:anexo-http}.
+
 \begin{table}[H]
 \centering
 \caption{Resultados de la ejecución local de pruebas automatizadas.}
@@ -146,27 +152,7 @@ Cobertura de sentencias & 98.07\%\\
 \end{table}
 
 \subsection{Construcción, publicación y despliegue}
-Las evidencias se deben capturar luego de ejecutar el pipeline con un cambio de demostración en \texttt{main}. La figura~\ref{fig:evidencia} propone espacios para incluir recortes legibles de los resultados reales de GitHub Actions, las etiquetas publicadas en Docker Hub y el endpoint de salud de EC2. No deben presentarse imágenes ficticias como evidencia de un despliegue realizado.
-
-\begin{figure}[H]
-\centering
-\fbox{\parbox[c][3cm][c]{0.9\linewidth}{\centering
-Insertar captura real del pipeline\\
-pruebas aprobadas, cobertura y despliegue}}
-\caption{Evidencia de GitHub Actions. Reemplazar el recuadro por una captura del pipeline ejecutado.}
-\label{fig:evidencia}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\fbox{\parbox[c][2.8cm][c]{0.42\linewidth}{\centering
-Insertar captura real\\de Docker Hub}}
-\hfill
-\fbox{\parbox[c][2.8cm][c]{0.42\linewidth}{\centering
-Insertar captura real\\de \texttt{/api/health}}}
-\caption{Evidencia de la imagen versionada y del servicio desplegado. Sustituir ambos recuadros por capturas reales con información sensible oculta.}
-\label{fig:docker-ec2}
-\end{figure}
+La ejecución \texttt{\#5}, iniciada por un \textit{push} a \texttt{main} del commit \texttt{48aa1d0}, finalizó exitosamente en 47 segundos. Los tres trabajos encadenados —pruebas y cobertura, publicación en Docker Hub y despliegue blue-green— concluyeron correctamente; la evidencia del resumen de Actions se incluye en la figura~\ref{fig:anexo-actions}. En Docker Hub se observan las etiquetas \texttt{latest} y SHA del commit publicadas para \texttt{vic8a1/integrador-api-rest} (figura~\ref{fig:anexo-docker}). Finalmente, se consultó \texttt{/api/health} en la dirección pública de EC2 y se obtuvo \texttt{\{"status":"ok"\}}, evidencia reproducible en la figura~\ref{fig:anexo-health}.
 
 \subsection{Seguridad y limitaciones}
 La dirección pública de EC2, la clave SSH y el token de Docker Hub se mantienen en secretos de Actions. El flujo comprueba la clave de host SSH fijada; la instancia no publica los puertos de backend. El almacén en memoria implica pérdida de datos al reiniciar y es una limitación deliberada. Asimismo, el proxy y las dos versiones se ejecutan en una única instancia, de modo que la técnica blue-green permite intercambios graduales de versión, pero no evita interrupciones por pérdida de la máquina, el disco o la conectividad de EC2.
@@ -174,15 +160,60 @@ La dirección pública de EC2, la clave SSH y el token de Docker Hub se mantiene
 La auditoría de dependencias identificó y eliminó una dependencia vulnerable de alta severidad del árbol de pruebas mediante la actualización de Jest a la versión 30.5.2. Permanece un hallazgo moderado, CVE-2026-97058 en \texttt{sprintf-js@1.0.3}, transitivo de Jest por \texttt{js-yaml} 3 y \texttt{argparse}. La herramienta de advisories no reporta una versión corregida y la versión más reciente consultada se encuentra dentro del rango afectado. Este hallazgo corresponde únicamente a dependencias de desarrollo; la auditoría de dependencias de producción no reportó vulnerabilidades. Se debe revisar nuevamente antes de una entrega o despliegue posterior.
 
 \section{Conclusiones}
-El proyecto muestra cómo vincular la verificación del código con su publicación y despliegue en una cadena automatizada. Las pruebas de integración ejercitan los endpoints y la condición de cobertura mínima convierte la calidad comprobada en un requisito de publicación, en vez de dejarla como un paso manual opcional. Docker permite identificar el artefacto por el commit que lo generó, mientras que las ramas de flujo impiden publicar o desplegar desde pull requests sin validar.
+El proyecto cumplió el objetivo de construir un flujo que conecta el cambio de código con su validación, publicación y despliegue. Las 19 pruebas automatizadas del backend aprobaron con 98.41\,\% de cobertura de ramas, 95.00\,\% de funciones, 98.05\,\% de líneas y 98.07\,\% de sentencias, todas por encima del umbral de 70\,\%. En las comprobaciones HTTP del panel se aprobaron 12 de 12 verificaciones. Además, la ejecución \texttt{\#5} del pipeline terminó exitosamente en 47 segundos, publicó las etiquetas esperadas y dejó accesible el endpoint de salud de EC2. Estos resultados están respaldados por las evidencias del anexo y no únicamente por una descripción del procedimiento.
 
-La actualización blue-green mejora la continuidad del servicio porque mantiene el backend activo hasta que la nueva versión supera el chequeo de salud y Nginx acepta su configuración. Sin embargo, no elimina el punto único de fallo de una instancia EC2 ni sustituye la persistencia de datos o una arquitectura de alta disponibilidad. La demostración final debe confirmar con capturas reales la cobertura, las etiquetas de Docker Hub y la respuesta HTTP de la instancia. Como trabajo futuro, conviene agregar persistencia en una base de datos administrada, monitorización, pruebas de carga y una estrategia multiinstancia.
+El despliegue blue-green reduce la interrupción durante una actualización porque conserva la versión activa hasta que la nueva supera la comprobación de salud y Nginx acepta la configuración. No obstante, el proyecto continúa limitado a una sola instancia EC2 y guarda usuarios y mensajes en memoria; por tanto, no ofrece alta disponibilidad ni persistencia durable, y los datos se pierden al reiniciar o reemplazar el contenedor. Como trabajo futuro se recomienda incorporar una base de datos administrada, monitorización y alertas, pruebas de carga y una estrategia multiinstancia. La automatización también debe mantener el principio de mínimo privilegio, revisar los cambios antes de fusionarlos y renovar las credenciales si existe sospecha de exposición.
 
 \section{Referencias}
-\begin{enumerate}
-  \item GitHub. (s.\,f.). \textit{GitHub Actions documentation}. \url{https://docs.github.com/actions}
-  \item Docker, Inc. (s.\,f.). \textit{Docker documentation: Build, ship, and run containers}. \url{https://docs.docker.com/}
-  \item Amazon Web Services. (s.\,f.). \textit{Amazon EC2 User Guide for Linux Instances}. \url{https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/}
-  \item OpenJS Foundation. (s.\,f.). \textit{Express documentation}. \url{https://expressjs.com/}
-\end{enumerate}
+\addcontentsline{toc}{section}{Referencias}
+\begin{thebibliography}{9}
+\bibitem{fielding2000} Fielding, R. T. (2000). \textit{Architectural styles and the design of network-based software architectures} [Tesis doctoral, University of California, Irvine]. \url{https://ics.uci.edu/~fielding/pubs/dissertation/top.htm}
+\bibitem{rfc9110} Fielding, R., Nottingham, M., y Reschke, J. (Eds.). (2022). \textit{HTTP Semantics} (RFC 9110). RFC Editor. \url{https://www.rfc-editor.org/rfc/rfc9110}
+\bibitem{githubactions} GitHub. (s.\,f.). \textit{GitHub Actions documentation}. Consultado el 8 de octubre de 2026, en \url{https://docs.github.com/actions}
+\bibitem{dockerdocs} Docker, Inc. (s.\,f.). \textit{Docker documentation}. Consultado el 8 de octubre de 2026, en \url{https://docs.docker.com/}
+\bibitem{awsec2} Amazon Web Services. (s.\,f.). \textit{What is Amazon EC2?}. Consultado el 8 de octubre de 2026, en \url{https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html}
+\bibitem{expressdocs} OpenJS Foundation. (s.\,f.). \textit{Express: documentación oficial}. Consultado el 8 de octubre de 2026, en \url{https://expressjs.com/}
+\bibitem{jestdocs} OpenJS Foundation. (s.\,f.). \textit{Jest: documentación oficial}. Consultado el 8 de octubre de 2026, en \url{https://jestjs.io/docs/getting-started}
+\bibitem{supertestdocs} Lj Harb. (s.\,f.). \textit{Supertest: testing node.js HTTP servers} [Repositorio de software]. GitHub. Consultado el 8 de octubre de 2026, en \url{https://github.com/ladjs/supertest}
+\end{thebibliography}
+
+\appendix
+\section{Evidencias visuales del proyecto}
+\addcontentsline{toc}{section}{Anexos: evidencias visuales}
+Las figuras de este anexo son capturas de las interfaces y servicios utilizados durante la validación. La figura~\ref{fig:anexo-panel} presenta la vista general del panel local; la figura~\ref{fig:anexo-http} amplía las verificaciones HTTP; la figura~\ref{fig:anexo-actions} documenta la ejecución exitosa del workflow; la figura~\ref{fig:anexo-docker} muestra las etiquetas del artefacto; y la figura~\ref{fig:anexo-health} registra la respuesta del servicio publicado. En las capturas se muestran únicamente resultados técnicos; no se incluyen tokens ni claves privadas.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth,height=0.72\textheight,keepaspectratio]{figuras/pruebas-api.png}
+\caption{Vista general del panel de administración en entorno local, con las métricas de cobertura y pruebas automatizadas.}
+\label{fig:anexo-panel}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth,height=0.68\textheight,keepaspectratio]{figuras/pruebas-api-detalle.png}
+\caption{Resultado de las 12 verificaciones HTTP ejecutadas desde el panel: todas aprobaron con los códigos de respuesta esperados.}
+\label{fig:anexo-http}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth,height=0.62\textheight,keepaspectratio]{figuras/github-actions.png}
+\caption{Resumen de GitHub Actions para el commit \texttt{48aa1d0}: pruebas, publicación de imagen y despliegue blue-green exitosos.}
+\label{fig:anexo-actions}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth,height=0.62\textheight,keepaspectratio]{figuras/docker-hub-tags.png}
+\caption{Repositorio de Docker Hub con las etiquetas \texttt{latest} y SHA del commit.}
+\label{fig:anexo-docker}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth,height=0.58\textheight,keepaspectratio]{figuras/health-api-ec2.png}
+\caption{Respuesta HTTP observada en el endpoint de salud de la instancia EC2 desplegada.}
+\label{fig:anexo-health}
+\end{figure}
 \end{document}

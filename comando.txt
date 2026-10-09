@@ -146,3 +146,16 @@ git status
 Invoke-RestMethod "http://<IP-o-DNS-EC2>/api/health"
 
 Si las pruebas fallan, el workflow no publica ni despliega la imagen.
+
+
+
+
+
+
+
+
+
+git add -- solo.txt
+git diff --cached --check
+git commit -m "Hola" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git push origin main
